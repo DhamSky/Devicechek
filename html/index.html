@@ -3,415 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GPS Buggy Master Control - Cloud SQLite</title>
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <title>Device Check Monitor</title>
+    <style>
+        body { font-family: sans-serif; margin: 40px; background: #f4f6f9; }
+        .container { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #007bff; color: white; }
+    </style>
 </head>
-<body class="bg-gray-100 font-sans text-gray-800">
+<body>
 
-    <nav class="bg-slate-900 text-white p-4 shadow-md sticky top-0 z-50">
-        <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
-            <div class="flex flex-col sm:flex-row items-center gap-3 w-full md:w-auto">
-                <h1 class="text-xl font-bold tracking-wide flex items-center gap-2 text-center sm:text-left">🛠️ GPS Buggy Control Center (SQLite)</h1>
-                <div class="flex items-center gap-2 bg-slate-800 px-3 py-1.5 rounded-md border border-slate-700 w-full sm:w-auto justify-between">
-                    <span class="text-xs text-gray-400 font-medium">📅 Periode:</span>
-                    <select id="period-select" onchange="handlePeriodChange(this.value)" class="bg-transparent text-white text-sm font-bold focus:outline-none cursor-pointer"></select>
-                </div>
-            </div>
-            <div class="flex flex-wrap gap-1 bg-slate-800 p-1 rounded-lg text-sm w-full md:w-auto justify-center">
-                <button onclick="switchTab('tab-main')" id="btn-tab-main" class="px-3 py-2 rounded-md font-medium bg-blue-600 text-white transition">Submisi Cek</button>
-                <button onclick="switchTab('tab-buggy')" id="btn-tab-buggy" class="px-3 py-2 rounded-md font-medium text-gray-300 hover:bg-slate-700 transition">Kelola Buggy</button>
-                <button onclick="switchTab('tab-kriteria')" id="btn-tab-kriteria" class="px-3 py-2 rounded-md font-medium text-gray-300 hover:bg-slate-700 transition">Kelola Kriteria</button>
-                <button onclick="switchTab('tab-logs')" id="btn-tab-logs" class="px-3 py-2 rounded-md font-medium text-gray-300 hover:bg-slate-700 transition">Semua Log</button>
-            </div>
-        </div>
-    </nav>
+<div class="container">
+    <h2>Daftar Perangkat (Device Check)</h2>
+    <div id="loading">Memuat data dari database...</div>
+    
+    <table id="device-table" style="display: none;">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Nama Perangkat</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="device-list">
+            </tbody>
+    </table>
+</div>
 
-    <main class="container mx-auto p-4 max-w-6xl">
-        <section id="tab-main" class="tab-content">
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                <div class="bg-white p-5 rounded-lg shadow-sm border-l-4 border-blue-500">
-                    <p class="text-sm text-gray-500 uppercase font-semibold">Total Unit Terdaftar</p>
-                    <p class="text-3xl font-bold text-gray-800" id="stat-total">0</p>
-                </div>
-                <div class="bg-white p-5 rounded-lg shadow-sm border-l-4 border-green-500">
-                    <p class="text-sm text-gray-500 uppercase font-semibold">Sudah Dicek (<span class="selected-period-label">Bulan Ini</span>)</p>
-                    <p class="text-3xl font-bold text-green-600" id="stat-checked">0</p>
-                </div>
-                <div class="bg-white p-5 rounded-lg shadow-sm border-l-4 border-red-500" id="alert-card-box">
-                    <p class="text-sm text-gray-500 uppercase font-semibold">Belum Dicek (<span class="selected-period-label">Bulan Ini</span>)</p>
-                    <p class="text-3xl font-bold text-red-600" id="stat-unchecked">0</p>
-                </div>
-            </div>
+<script>
+    // Panggil API Backend (sesuaikan IP/Port jika backend ditaruh di server berbeda)
+    const apiUrl = 'http://localhost:3000/api/devices';
 
-            <div class="bg-white p-4 rounded-lg shadow-sm mb-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-                <div class="flex gap-2 w-full sm:w-auto">
-                    <button onclick="filterDevices('all')" id="btn-filter-all" class="flex-1 sm:flex-none px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md shadow-sm">Semua Unit</button>
-                    <button onclick="filterDevices('unchecked')" id="btn-filter-alert" class="flex-1 sm:flex-none px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md shadow-sm">⚠️ Belum Dicek</button>
-                </div>
-                <button onclick="exportToCSV()" class="w-full sm:w-auto px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md shadow-sm">📥 Ekspor (.CSV) Periode Ini</button>
-            </div>
-
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div class="lg:col-span-1 bg-white p-4 rounded-lg shadow-sm max-h-[600px] flex flex-col">
-                    <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="Cari nomor buggy..." class="w-full p-2 mb-3 text-sm border rounded-md bg-gray-50">
-                    <div class="space-y-2 overflow-y-auto flex-1 pr-1" id="device-list-container"></div>
-                </div>
-
-                <div class="lg:col-span-2 bg-white p-6 rounded-lg shadow-sm border border-gray-200">
-                    <h3 class="text-lg font-bold mb-4 text-gray-700 border-b pb-2">Pemeriksaan Unit: <span id="selected-device-title" class="text-blue-600">Pilih Unit</span></h3>
-                    <form id="maintenance-form" onsubmit="saveChecklist(event)" class="space-y-4 hidden">
-                        <input type="hidden" id="form-device-id">
-                        <div class="bg-blue-50 text-blue-800 p-2.5 rounded text-xs font-semibold mb-2">
-                            📝 Target Periode: <span id="form-period-text" class="underline"></span>
-                        </div>
-                        <div id="dynamic-form-fields" class="space-y-4"></div>
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-1">Catatan Tambahan</label>
-                            <textarea id="input-catatan" rows="2" class="w-full p-2 border rounded-md bg-gray-50 text-sm" placeholder="Detail kendala jika ada..."></textarea>
-                        </div>
-                        <button type="submit" class="w-full py-3 bg-blue-600 text-white font-semibold rounded-md shadow">💾 Simpan & Sinkron ke SQLite</button>
-                    </form>
-                    <div id="form-placeholder" class="text-center py-20 text-gray-400">
-                        <p class="text-5xl mb-2">📲</p>
-                        <p>Pilih nomor unit buggy di sebelah kiri untuk melakukan input data.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <section id="tab-buggy" class="tab-content hidden">
-            <div class="bg-white p-6 rounded-lg shadow-sm max-w-2xl mx-auto">
-                <h3 class="text-lg font-bold mb-4 border-b pb-2 text-gray-700">🚜 Manajemen Master Unit Buggy</h3>
-                <div class="flex gap-2 mb-6 bg-gray-50 p-3 rounded-lg border">
-                    <input type="hidden" id="edit-buggy-index">
-                    <input type="text" id="buggy-input-id" placeholder="Contoh: Buggy-143" class="flex-1 p-2 border rounded-md bg-white text-sm">
-                    <button onclick="saveBuggyUnit()" id="btn-save-buggy" class="px-4 py-2 bg-blue-600 text-white font-medium rounded-md text-sm">➕ Tambah</button>
-                    <button onclick="cancelBuggyEdit()" id="btn-cancel-buggy" class="px-3 py-2 bg-gray-300 text-gray-700 font-medium rounded-md text-sm hidden">Batal</button>
-                </div>
-                <div class="overflow-x-auto max-h-[400px] overflow-y-auto border rounded-lg">
-                    <table class="w-full text-left text-sm text-gray-500">
-                        <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0">
-                            <tr><th class="px-6 py-3">Nama/ID Buggy</th><th class="px-6 py-3 text-right">Aksi</th></tr>
-                        </thead>
-                        <tbody id="buggy-table-body"></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-
-        <section id="tab-kriteria" class="tab-content hidden">
-            <div class="bg-white p-6 rounded-lg shadow-sm max-w-3xl mx-auto">
-                <h3 class="text-lg font-bold mb-4 border-b pb-2 text-gray-700">📋 Kriteria Parameter Pemeriksaan</h3>
-                <div class="bg-gray-50 p-4 rounded-lg border mb-6 space-y-3">
-                    <input type="hidden" id="edit-criteria-index">
-                    <div>
-                        <label class="block text-xs font-semibold uppercase text-gray-500 mb-1">Nama Parameter Kriteria</label>
-                        <input type="text" id="criteria-input-name" class="w-full p-2 border rounded-md text-sm">
-                    </div>
-                    <div>
-                        <label class="block text-xs font-semibold uppercase text-gray-500 mb-1">Opsi Penilaian (Pisahkan dengan koma)</label>
-                        <input type="text" id="criteria-input-options" placeholder="Bagus, Rusak" class="w-full p-2 border rounded-md text-sm">
-                    </div>
-                    <div class="flex gap-2 justify-end">
-                        <button onclick="cancelCriteriaEdit()" id="btn-cancel-crit" class="px-4 py-2 bg-gray-300 text-gray-700 text-sm hidden">Batal</button>
-                        <button onclick="saveCriteria()" id="btn-save-crit" class="px-5 py-2 bg-blue-600 text-white text-sm rounded-md">💾 Simpan Kriteria</button>
-                    </div>
-                </div>
-                <div class="space-y-3" id="criteria-list-container"></div>
-            </div>
-        </section>
-
-        <section id="tab-logs" class="tab-content hidden">
-            <div class="bg-white p-6 rounded-lg shadow-sm">
-                <h3 class="text-lg font-bold mb-4 border-b pb-2 text-gray-700">📜 Semua Histori Master Log (SQLite Terpusat)</h3>
-                <div class="overflow-x-auto border rounded-lg max-h-[500px] overflow-y-auto">
-                    <table class="w-full text-left text-sm text-gray-500">
-                        <thead class="text-xs text-gray-700 uppercase bg-gray-100 sticky top-0">
-                            <tr id="log-table-header"></tr>
-                        </thead>
-                        <tbody id="log-table-body"></tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-    </main>
-
-    <script>
-        // === KONFIGURASI ALAMAT API ===
-        // Ganti dengan IP LXC Proxmox kamu tempat API Node.js berjalan
-        const API_BASE_URL = `http://${window.location.hostname}:3000/api`;
-
-        let buggyList = [];
-        let criteriaList = [];
-        let checkingLogs = [];
-        
-        let currentFilter = 'all';
-        let searchQuery = '';
-        let selectedPeriod = ''; 
-
-        const defaultBuggies = Array.from({length: 142}, (_, i) => `Buggy-${String(i + 1).padStart(3, '0')}`);
-        const defaultCriteria = [
-            { name: "Kondisi Layar", options: ["Baik", "Bergaris", "Tidak Berfungsi"] },
-            { name: "Kondisi Charger Modul", options: ["Normal", "Lemah", "Tidak Berfungsi"] },
-            { name: "Kondisi Kabel Charger", options: ["Bagus", "Retak/Rusak", "Terputus"] },
-            { name: "Kondisi Bracket", options: ["Bagus/Normal", "Tidak Kencang"] }
-        ];
-
-        function setupPeriodDropdown() {
-            const select = document.getElementById('period-select');
-            select.innerHTML = '';
-            const namaBulan = ["Januari", "Februari", "Maret", "April", "Mei", "Juni", "Juli", "Agustus", "September", "Oktober", "November", "Desember"];
-            const today = new Date(); 
-            for (let i = 0; i < 6; i++) {
-                const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-                const periodValue = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                const opt = document.createElement('option');
-                opt.value = periodValue;
-                opt.innerText = i === 0 ? `🔥 ${namaBulan[d.getMonth()]} ${d.getFullYear()} (Bulan Ini)` : `⏳ ${namaBulan[d.getMonth()]} ${d.getFullYear()}`;
-                select.appendChild(opt);
-            }
-            selectedPeriod = select.value; 
-        }
-
-        async function loadLogsFromSQLite() {
-            try {
-                const res = await fetch(`${API_BASE_URL}/logs`);
-                if (res.ok) {
-                    checkingLogs = await res.json();
-                }
-            } catch (err) {
-                console.error("Gagal mengambil data dari SQLite backend:", err);
-            }
-        }
-
-        async function initApp() {
-            setupPeriodDropdown();
-
-            // Load Konfigurasi Struktur Alat dari LocalStorage (Bisa tetap di local atau dipindah nanti)
-            const localBuggies = localStorage.getItem('cfg_buggies');
-            buggyList = localBuggies ? JSON.parse(localBuggies) : defaultBuggies;
-            if(!localBuggies) localStorage.setItem('cfg_buggies', JSON.stringify(buggyList));
-
-            const localCriteria = localStorage.getItem('cfg_criteria');
-            criteriaList = localCriteria ? JSON.parse(localCriteria) : defaultCriteria;
-            if(!localCriteria) localStorage.setItem('cfg_criteria', JSON.stringify(criteriaList));
-
-            // AMBIL DATA UTAMA DARI SQLITE SERVER TERPUSAT
-            await loadLogsFromSQLite();
-
-            updateUIPeriodLabels();
-            updateDashboardStats();
-            renderDeviceList();
-            buildDynamicForm();
-            renderBuggyTable();
-            renderCriteriaList();
-            renderLogTable();
-        }
-
-        function handlePeriodChange(newPeriod) {
-            selectedPeriod = newPeriod;
-            updateUIPeriodLabels();
-            updateDashboardStats();
-            renderDeviceList();
-            document.getElementById('maintenance-form').classList.add('hidden');
-            document.getElementById('form-placeholder').classList.remove('hidden');
-        }
-
-        function updateUIPeriodLabels() {
-            const selectEl = document.getElementById('period-select');
-            const txt = selectEl.options[selectEl.selectedIndex].innerText.replace('🔥 ', '').replace('⏳ ', '');
-            document.querySelectorAll('.selected-period-label').forEach(el => el.innerText = txt);
-            document.getElementById('form-period-text').innerText = txt;
-        }
-
-        function switchTab(tabId) {
-            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.getElementById(tabId).classList.remove('hidden');
-            document.querySelectorAll('nav button').forEach(btn => btn.className = "px-3 py-2 rounded-md font-medium text-gray-300 hover:bg-slate-700 transition");
-            document.getElementById('btn-' + tabId).className = "px-3 py-2 rounded-md font-medium bg-blue-600 text-white transition";
-            if(tabId === 'tab-main' || tabId === 'tab-logs') { refreshDataView(); }
-        }
-
-        async function refreshDataView() {
-            await loadLogsFromSQLite();
-            updateDashboardStats();
-            renderDeviceList();
-            renderLogTable();
-        }
-
-        function updateDashboardStats() {
-            const total = buggyList.length;
-            const checked = checkingLogs.filter(l => l.period === selectedPeriod).length;
-            const unchecked = total - checked;
-            document.getElementById('stat-total').innerText = total;
-            document.getElementById('stat-checked').innerText = checked;
-            document.getElementById('stat-unchecked').innerText = unchecked >= 0 ? unchecked : 0;
-        }
-
-        function handleSearch(val) { searchQuery = val.trim().toLowerCase(); renderDeviceList(); }
-        function filterDevices(type) {
-            currentFilter = type;
-            document.getElementById('btn-filter-all').className = type === 'all' ? "flex-1 sm:flex-none px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md shadow-sm" : "flex-1 sm:flex-none px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md shadow-sm";
-            document.getElementById('btn-filter-alert').className = type === 'unchecked' ? "flex-1 sm:flex-none px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md shadow-sm" : "flex-1 sm:flex-none px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md shadow-sm";
-            renderDeviceList();
-        }
-
-        function renderDeviceList() {
-            const container = document.getElementById('device-list-container');
-            container.innerHTML = '';
-            const filtered = buggyList.filter(buggyId => {
-                const isLogExist = checkingLogs.find(l => l.buggyId === buggyId && l.period === selectedPeriod);
-                return (currentFilter === 'unchecked' ? !isLogExist : true) && buggyId.toLowerCase().includes(searchQuery);
-            });
-            if (filtered.length === 0) { container.innerHTML = `<p class="text-xs text-gray-400 text-center py-4">Kosong.</p>`; return; }
-            filtered.forEach(buggyId => {
-                const log = checkingLogs.find(l => l.buggyId === buggyId && l.period === selectedPeriod);
-                const isChecked = !!log;
-                const card = document.createElement('div');
-                card.className = `p-3 rounded-lg border cursor-pointer flex justify-between items-center ${isChecked ? 'bg-green-50/40 border-green-200' : 'bg-white border-gray-200'}`;
-                card.onclick = () => openFormCheck(buggyId);
-                card.innerHTML = `<div><p class="font-bold text-sm text-gray-800">${buggyId}</p><p class="text-[11px] text-gray-400">${isChecked ? 'Tgl: '+log.date : 'Belum Cek'}</p></div>`;
-                container.appendChild(card);
-            });
-        }
-
-        function buildDynamicForm() {
-            const fieldsContainer = document.getElementById('dynamic-form-fields');
-            fieldsContainer.innerHTML = '';
-            criteriaList.forEach((crit, index) => {
-                const wrapper = document.createElement('div');
-                wrapper.innerHTML = `<label class="block text-sm font-medium text-gray-700 mb-1">${crit.name}</label><select id="dynamic-input-${index}" class="w-full p-2 border rounded-md bg-gray-50 text-sm">${crit.options.map(opt => `<option value="${opt}">${opt}</option>`).join('')}</select>`;
-                fieldsContainer.appendChild(wrapper);
-            });
-        }
-
-        function openFormCheck(buggyId) {
-            document.getElementById('form-placeholder').classList.add('hidden');
-            const form = document.getElementById('maintenance-form');
-            form.classList.remove('hidden');
-            document.getElementById('selected-device-title').innerText = buggyId;
-            document.getElementById('form-device-id').value = buggyId;
-            const existingLog = checkingLogs.find(l => l.buggyId === buggyId && l.period === selectedPeriod);
-            criteriaList.forEach((_, index) => {
-                const selectElement = document.getElementById(`dynamic-input-${index}`);
-                if(existingLog && existingLog.results[index]) selectElement.value = existingLog.results[index];
-                else selectElement.selectedIndex = 0;
-            });
-            document.getElementById('input-catatan').value = existingLog ? existingLog.catatan : '';
-        }
-
-        async function saveChecklist(e) {
-            e.preventDefault();
-            const buggyId = document.getElementById('form-device-id').value;
-            const now = new Date();
-            const formattedDate = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
-            const resultsData = {};
-            criteriaList.forEach((_, index) => { resultsData[index] = document.getElementById(`dynamic-input-${index}`).value; });
-
-            const existingLog = checkingLogs.find(l => l.buggyId === buggyId && l.period === selectedPeriod);
+    async function loadDevices() {
+        try {
+            const response = await fetch(apiUrl);
+            const data = await response.json();
             
-            const logPayload = {
-                id: existingLog ? existingLog.id : 'log_' + buggyId + '_' + selectedPeriod,
-                buggyId: buggyId,
-                period: selectedPeriod, 
-                date: formattedDate,
-                results: resultsData,
-                catatan: document.getElementById('input-catatan').value || '-'
-            };
-
-            // KIRIM DATA KE BACKEND SQLITE
-            try {
-                const response = await fetch(`${API_BASE_URL}/logs`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(logPayload)
-                });
-                if(response.ok) {
-                    await refreshDataView();
-                    document.getElementById('maintenance-form').classList.add('hidden');
-                    document.getElementById('form-placeholder').classList.remove('hidden');
-                    alert(`Data ${buggyId} tersimpan terpusat di database SQLite.`);
-                } else {
-                    alert('Gagal menyinkronkan data ke server!');
-                }
-            } catch(err) {
-                alert('Koneksi ke server SQLite terputus! Periksa jaringan.');
-            }
-        }
-
-        // === FUNGSI MASTER CRUD TABEL SAMA DENGAN VERSI SEBELUMNYA ===
-        function renderBuggyTable() {
-            const tbody = document.getElementById('buggy-table-body'); tbody.innerHTML = '';
-            buggyList.forEach((buggy, index) => {
-                const tr = document.createElement('tr'); tr.className = "bg-white border-b text-gray-700 text-sm";
-                tr.innerHTML = `<td class="px-6 py-4 font-medium">${buggy}</td><td class="px-6 py-4 text-right"><button onclick="deleteBuggyUnit(${index})" class="text-red-600">Hapus</button></td>`;
-                tbody.appendChild(tr);
-            });
-        }
-        function saveBuggyUnit() {
-            const input = document.getElementById('buggy-input-id'); const val = input.value.trim();
-            if (!val || buggyList.includes(val)) return; buggyList.push(val); localStorage.setItem('cfg_buggies', JSON.stringify(buggyList));
-            input.value = ''; renderBuggyTable(); updateDashboardStats(); renderDeviceList();
-        }
-        function deleteBuggyUnit(index) { buggyList.splice(index, 1); localStorage.setItem('cfg_buggies', JSON.stringify(buggyList)); renderBuggyTable(); updateDashboardStats(); renderDeviceList(); }
-        function renderCriteriaList() {
-            const container = document.getElementById('criteria-list-container'); container.innerHTML = '';
-            criteriaList.forEach((crit, index) => {
-                const div = document.createElement('div'); div.className = "p-4 bg-white border rounded-lg flex justify-between items-start";
-                div.innerHTML = `<div><h4 class="font-bold text-sm">${index + 1}. ${crit.name}</h4></div><button onclick="deleteCriteria(${index})" class="text-red-600 text-xs">Hapus</button>`;
-                container.appendChild(div);
-            });
-        }
-        function saveCriteria() {
-            const nameIn = document.getElementById('criteria-input-name').value.trim(); const optionsIn = document.getElementById('criteria-input-options').value.trim();
-            if(!nameIn || !optionsIn) return; criteriaList.push({ name: nameIn, options: optionsIn.split(',').map(o => o.trim()) });
-            localStorage.setItem('cfg_criteria', JSON.stringify(criteriaList)); buildDynamicForm(); renderCriteriaList();
-        }
-        function deleteCriteria(index) { criteriaList.splice(index, 1); localStorage.setItem('cfg_criteria', JSON.stringify(criteriaList)); buildDynamicForm(); renderCriteriaList(); }
-
-        function renderLogTable() {
-            const headerTr = document.getElementById('log-table-header'); const tbody = document.getElementById('log-table-body');
-            let headerHTML = `<th class="px-4 py-3">Periode</th><th class="px-4 py-3">Unit Buggy</th><th class="px-4 py-3">Tanggal Input</th>`;
-            criteriaList.forEach(crit => { headerHTML += `<th class="px-4 py-3">${crit.name}</th>`; });
-            headerHTML += `<th class="px-4 py-3">Catatan</th><th class="px-4 py-3 text-right">Aksi</th>`;
-            headerTr.innerHTML = headerHTML; tbody.innerHTML = '';
+            const tbody = document.getElementById('device-list');
+            tbody.innerHTML = ''; // Kosongkan placeholder
             
-            const sortedLogs = [...checkingLogs].sort((a,b) => b.id.localeCompare(a.id));
-            sortedLogs.forEach((log) => {
-                const tr = document.createElement('tr'); tr.className = "bg-white border-b text-xs text-gray-700";
-                let rowHTML = `<td class="px-4 py-3 font-semibold text-blue-700">${log.period}</td><td class="px-4 py-3 font-bold">${log.buggyId}</td><td class="px-4 py-3">${log.date}</td>`;
-                criteriaList.forEach((_, critIdx) => { rowHTML += `<td class="px-4 py-3">${log.results[critIdx] || '-'}</td>`; });
-                rowHTML += `<td class="px-4 py-3 truncate max-w-[150px]">${log.catatan}</td><td class="px-4 py-3 text-right"><button onclick="deleteLogEntry('${log.id}')" class="text-red-500">Hapus</button></td>`;
-                tr.innerHTML = rowHTML; tbody.appendChild(tr);
+            // Loop data hasil query Postgres
+            data.forEach(device => {
+                const row = `<tr>
+                    <td>${device.id}</td>
+                    <td>${device.nama_device || device.name || 'N/A'}</td>
+                    <td>${device.status || 'N/A'}</td>
+                </tr>`;
+                tbody.innerHTML += row;
             });
+
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('device-table').style.display = 'table';
+            
+        } catch (error) {
+            console.error('Gagal mengambil data:', error);
+            document.getElementById('loading').innerText = 'Gagal tersambung ke server backend.';
         }
+    }
 
-        async function deleteLogEntry(id) {
-            if(confirm('Hapus log ini dari database SQLite?')) {
-                await fetch(`${API_BASE_URL}/logs/${id}`, { method: 'DELETE' });
-                await refreshDataView();
-            }
-        }
+    // Jalankan fungsi saat halaman dibuka
+    loadDevices();
+</script>
 
-        function exportToCSV() {
-            let csvContent = "data:text/csv;charset=utf-8,Periode,ID Buggy,Tanggal Cek," + criteriaList.map(c => c.name).join(",") + ",Catatan\n";
-            buggyList.forEach(buggyId => {
-                const log = checkingLogs.find(l => l.buggyId === buggyId && l.period === selectedPeriod);
-                const row = [selectedPeriod, buggyId, log ? log.date : "Belum Dicek"];
-                criteriaList.forEach((_, critIdx) => { row.push(log ? log.results[critIdx] : "-"); });
-                row.push(log ? `"${log.catatan}"` : "-");
-                csvContent += row.join(",") + "\n";
-            });
-            const link = document.createElement("a"); link.setAttribute("href", encodeURI(csvContent)); link.setAttribute("download", `Laporan_SQLite_Periode_${selectedPeriod}.csv`); document.body.appendChild(link); link.click(); document.body.removeChild(link);
-        }
-
-        window.addEventListener('beforeunload', function (e) {
-            if (!document.getElementById('maintenance-form').classList.contains('hidden')) {
-                e.preventDefault(); e.returnValue = 'Data belum disimpan!'; return e.returnValue;
-            }
-        });
-
-        window.onload = initApp;
-    </script>
 </body>
 </html>
