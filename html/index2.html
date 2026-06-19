@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPS Buggy Control Center (SQLite)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #f1f1f1; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-800 antialiased">
+
+    <header class="bg-[#0b132b] text-white sticky top-0 z-50 shadow-md">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-xl">🔧</span>
+                    <h1 class="text-lg font-bold tracking-tight">GPS Buggy Control Center (SQLite)</h1>
+                </div>
+                <div class="flex items-center bg-[#1c2541] border border-slate-700 rounded-md px-2 py-1 text-xs text-slate-300">
+                    <span class="mr-1">📅 Periode:</span>
+                    <input type="month" id="period-select" onchange="changePeriod()" class="bg-transparent font-semibold text-white focus:outline-none cursor-pointer">
+                </div>
+            </div>
+            
+            <nav class="flex flex-wrap items-center gap-1 bg-[#1c2541] p-1 rounded-lg text-sm font-medium">
+                <button id="btn-tab-submisi" onclick="switchTab('submisi')" class="px-3 py-1.5 rounded-md transition-all text-white bg-blue-600 font-semibold cursor-pointer">Submisi Cek</button>
+                <button id="btn-tab-buggy" onclick="switchTab('buggy')" class="px-3 py-1.5 rounded-md transition-all text-slate-300 hover:text-white cursor-pointer">Kelola Buggy</button>
+                <button id="btn-tab-kriteria" onclick="switchTab('kriteria')" class="px-3 py-1.5 rounded-md transition-all text-slate-300 hover:text-white cursor-pointer">Kelola Kriteria</button>
+                <button id="btn-tab-logs" onclick="switchTab('logs')" class="px-3 py-1.5 rounded-md transition-all text-slate-300 hover:text-white cursor-pointer">Semua Log</button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        
+        <div id="view-submisi" class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <section class="lg:col-span-5 bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col h-[calc(100vh-140px)]">
+                <div class="space-y-3 mb-4">
+                    <input type="text" id="search-input" oninput="handleSearch(this.value)" placeholder="Cari nomor buggy (misal: 023)..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <div class="flex flex-wrap gap-2 w-full">
+                        <button onclick="filterDevices('all')" id="btn-filter-all" class="flex-1 text-center px-2 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg transition-all cursor-pointer">Semua</button>
+                        <button onclick="filterDevices('unchecked')" id="btn-filter-alert" class="flex-1 text-center px-2 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg transition-all cursor-pointer">⚠️ Bln Ini</button>
+                        <button onclick="filterDevices('daily_unchecked')" id="btn-filter-daily" class="flex-1 text-center px-2 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg transition-all cursor-pointer">🌐 Hari Ini</button>
+                    </div>
+                </div>
+                <div id="device-list-container" class="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar"></div>
+            </section>
+
+            <section class="lg:col-span-7 bg-white rounded-xl shadow-sm border border-slate-200 p-6 flex flex-col justify-between h-[calc(100vh-140px)] overflow-y-auto custom-scrollbar">
+                <div id="form-placeholder" class="flex flex-col items-center justify-center text-center h-full py-12">
+                    <div class="text-5xl mb-3 opacity-40">📋</div>
+                    <h3 class="text-base font-bold text-slate-700">Pilih Unit Buggy</h3>
+                    <p class="text-xs text-slate-400 max-w-xs mt-1">Klik salah satu nomor unit di sebelah kiri untuk memulai inspeksi harian.</p>
+                </div>
+
+                <form id="maintenance-form" class="hidden space-y-5 flex-1 flex flex-col justify-between" onsubmit="saveChecklist(event)">
+                    <div>
+                        <div class="border-b border-slate-100 pb-3 mb-4 flex justify-between items-center">
+                            <div>
+                                <span class="text-[10px] uppercase tracking-wider bg-blue-100 text-blue-700 font-bold px-2 py-0.5 rounded">Inspection Form</span>
+                                <h2 id="selected-device-title" class="text-xl font-extrabold text-slate-900 mt-0.5"></h2>
+                            </div>
+                            <input type="hidden" id="form-device-id">
+                            <span id="current-date-badge" class="text-xs font-bold bg-slate-100 text-slate-600 px-3 py-1 rounded-md"></span>
+                        </div>
+                        <div id="dynamic-criteria-container" class="grid grid-cols-1 md:grid-cols-2 gap-4"></div>
+                        <div class="mt-4">
+                            <label for="input-catatan" class="block text-xs font-bold text-slate-600 mb-1.5">Catatan Tambahan / Kendala Fisik & Jaringan:</label>
+                            <textarea id="input-catatan" rows="3" placeholder="Tulis catatan kendala link eror atau kondisi fisik perangkat..." class="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                        </div>
+                    </div>
+                    <div class="border-t border-slate-100 pt-4 flex gap-3 mt-6">
+                        <button type="button" onclick="cancelForm()" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-lg transition-colors cursor-pointer">Batal</button>
+                        <button type="submit" class="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg shadow transition-colors text-center cursor-pointer">Simpan Laporan Masuk</button>
+                    </div>
+                </form>
+            </section>
+        </div>
+
+        <div id="view-buggy" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
+            <div class="flex justify-between items-center border-b border-slate-100 pb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-900">Master Data Unit Buggy</h2>
+                    <p class="text-xs text-slate-500">Tambah atau hapus daftar armada kereta golf yang aktif di sistem.</p>
+                </div>
+                <form id="form-add-buggy" onsubmit="addBuggyMaster(event)" class="flex gap-2">
+                    <input type="text" id="input-new-buggy" required placeholder="Contoh: Buggy-143" class="px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg shadow hover:bg-blue-700 cursor-pointer">+ Tambah Unit</button>
+                </form>
+            </div>
+            <div id="master-buggy-list" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar"></div>
+        </div>
+
+        <div id="view-kriteria" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-6">
+            <div class="flex justify-between items-center border-b border-slate-100 pb-4">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-900">Master Kriteria Inspeksi</h2>
+                    <p class="text-xs text-slate-500">Kustomisasi parameter pengecekan dinamis untuk kebutuhan pemeriksaan harian.</p>
+                </div>
+                <button onclick="resetKriteriaToDefault()" class="px-3 py-1.5 bg-rose-600 text-white text-xs font-semibold rounded-lg hover:bg-rose-700 cursor-pointer">🔄 Reset ke Default</button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <form onsubmit="addKriteriaMaster(event)" class="bg-slate-50 p-4 rounded-xl border border-slate-200 h-fit space-y-4">
+                    <h3 class="text-sm font-bold text-slate-800">Form Kriteria Baru</h3>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Nama Kriteria:</label>
+                        <input type="text" id="input-crit-name" required placeholder="Misal: Pengecekan URL Link" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Opsi Hasil (Pisahkan dengan koma):</label>
+                        <input type="text" id="input-crit-options" required placeholder="Misal: Aktif, Error, Terblokir" class="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <button type="submit" class="w-full py-2 bg-blue-600 text-white text-xs font-bold rounded-lg shadow hover:bg-blue-700 cursor-pointer">Simpan Kriteria</button>
+                </form>
+                <div class="md:col-span-2 space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar" id="master-kriteria-list"></div>
+            </div>
+        </div>
+
+        <div id="view-logs" class="hidden bg-white rounded-xl shadow-sm border border-slate-200 p-6 space-y-4">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-center border-b border-slate-100 pb-4 gap-3">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-900">Semua Histori Laporan Pemeriksaan</h2>
+                    <p class="text-xs text-slate-500">Menampilkan rekaman seluruh aktivitas checking harian pada periode terpilih.</p>
+                </div>
+                <button onclick="exportToCSV()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition-colors flex items-center justify-center gap-1 cursor-pointer">
+                    📊 Unduh Laporan (.CSV)
+                </button>
+            </div>
+            <div class="overflow-x-auto border border-slate-200 rounded-xl custom-scrollbar">
+                <table class="w-full text-left border-collapse text-sm">
+                    <thead>
+                        <tr class="bg-slate-50 border-b border-slate-200 text-slate-700 text-xs font-bold uppercase">
+                            <th class="p-3">Tanggal</th>
+                            <th class="p-3">ID Buggy</th>
+                            <th class="p-3">Detail Parameter Penilaian</th>
+                            <th class="p-3">Catatan</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-logs-body" class="divide-y divide-slate-100 text-slate-600"></tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        // === CONFIGURATION BACKEND ===
+        const API_BASE_URL = 'http://192.168.88.23:5678/webhook/maintenance'; 
+        
+        // Kriteria Default Utama
+        const defaultCriteria = [
+            { name: "Kondisi Layar", options: ["Baik", "Bergaris", "Tidak Berfungsi"] },
+            { name: "Kondisi Charger Modul", options: ["Normal", "Lemah", "Tidak Berfungsi"] },
+            { name: "Kondisi Kabel Charger", options: ["Bagus", "Retak/Rusak", "Terputus"] },
+            { name: "Kondisi Bracket", options: ["Bagus/Normal", "Tidak Kencang"] },
+            { name: "Pengecekan URL Link Aktif", options: ["Aktif/Terbuka", "Error/Koneksi Putus", "Terblokir"] },
+            { name: "Pembersihan Perangkat", options: ["Sudah Bersih", "Kotor/Perlu Di-lap"] }
+        ];
+
+        // State Core Aplikasi
+        let buggyList = [];
+        let criteriaList = [];
+        let checkingLogs = [];
+        let currentFilter = 'all';
+        let searchQuery = '';
+        let selectedPeriod = '';
+
+        // RUNTIME STARTUP INTERACTION
+        window.addEventListener('DOMContentLoaded', async () => {
+            const now = new Date();
+            selectedPeriod = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+            document.getElementById('period-select').value = selectedPeriod;
+            document.getElementById('current-date-badge').innerText = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+
+            // 1. Data Master Buggy (LocalStorage Init)
+            const localBuggy = localStorage.getItem('cfg_buggy_fleet');
+            if (localBuggy) {
+                buggyList = JSON.parse(localBuggy);
+            } else {
+                // Generate default 142 armada pertama kali
+                buggyList = Array.from({ length: 142 }, (_, i) => `Buggy-${String(i + 1).padStart(3, '0')}`);
+                localStorage.setItem('cfg_buggy_fleet', JSON.stringify(buggyList));
+            }
+
+            // 2. Data Master Kriteria (LocalStorage Init)
+            const localCriteria = localStorage.getItem('cfg_criteria');
+            if (localCriteria) {
+                criteriaList = JSON.parse(localCriteria);
+            } else {
+                criteriaList = defaultCriteria;
+                localStorage.setItem('cfg_criteria', JSON.stringify(defaultCriteria));
+            }
+
+            buildFormFields();
+            await fetchLogsFromServer();
+            renderMasterBuggy();
+            renderMasterKriteria();
+        });
+
+        // MANAGEMENT TAB ENGINE VIA DOM
+        function switchTab(tabId) {
+            ['submisi', 'buggy', 'kriteria', 'logs'].forEach(id => {
+                document.getElementById(`view-${id}`).classList.add('hidden');
+                document.getElementById(`btn-tab-${id}`).className = "px-3 py-1.5 rounded-md transition-all text-slate-300 hover:text-white cursor-pointer";
+            });
+            document.getElementById(`view-${tabId}`).classList.remove('hidden');
+            document.getElementById(`btn-tab-${tabId}`).className = "px-3 py-1.5 rounded-md transition-all text-white bg-blue-600 font-semibold cursor-pointer";
+            
+            if(tabId === 'logs') renderLogsTable();
+        }
+
+        // DATABASE SINKRONISASI SERVER
+        async function fetchLogsFromServer() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/logs?period=${selectedPeriod}`);
+                if (response.ok) checkingLogs = await response.json();
+            } catch (err) {
+                console.warn("Koneksi API Offline. Berjalan dengan temporary runtime storage.");
+            }
+            renderDeviceList();
+        }
+
+        // FORM BUILDER DINAMIS
+        function buildFormFields() {
+            const container = document.getElementById('dynamic-criteria-container');
+            container.innerHTML = '';
+            criteriaList.forEach((crit, index) => {
+                const div = document.createElement('div');
+                div.className = 'flex flex-col gap-1';
+                let optionsHtml = crit.options.map(o => `<option value="${o}">${o}</option>`).join('');
+                div.innerHTML = `
+                    <label for="dynamic-input-${index}" class="text-xs font-bold text-slate-700">${crit.name}</label>
+                    <select id="dynamic-input-${index}" class="bg-slate-50 border border-slate-200 rounded-lg p-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        ${optionsHtml}
+                    </select>`;
+                container.appendChild(div);
+            });
+        }
+
+        // FILTER INTERACTIVE SUBMISI
+        function filterDevices(type) {
+            currentFilter = type;
+            const btnAll = document.getElementById('btn-filter-all');
+            const btnMonth = document.getElementById('btn-filter-alert');
+            const btnDaily = document.getElementById('btn-filter-daily');
+
+            [btnAll, btnMonth, btnDaily].forEach(b => b.className = "flex-1 text-center px-2 py-1.5 bg-slate-100 text-slate-600 text-xs font-bold rounded-lg transition-all cursor-pointer");
+
+            if (type === 'all') btnAll.className = "flex-1 text-center px-2 py-1.5 bg-blue-600 text-white text-xs font-bold rounded-lg transition-all cursor-pointer";
+            if (type === 'unchecked') btnMonth.className = "flex-1 text-center px-2 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg transition-all cursor-pointer";
+            if (type === 'daily_unchecked') btnDaily.className = "flex-1 text-center px-2 py-1.5 bg-purple-600 text-white text-xs font-bold rounded-lg transition-all cursor-pointer";
+            renderDeviceList();
+        }
+
+        function handleSearch(val) {
+            searchQuery = val.toLowerCase();
+            renderDeviceList();
+        }
+
+        // RENDER CORE DASHBOARD UTAMA
+        function renderDeviceList() {
+            const container = document.getElementById('device-list-container');
+            container.innerHTML = '';
+            const now = new Date();
+            const todayStr = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+
+            const filtered = buggyList.filter(buggyId => {
+                const logMonth = checkingLogs.find(l => l.buggyId === buggyId && l.period === selectedPeriod);
+                const logToday = checkingLogs.find(l => l.buggyId === buggyId && l.date === todayStr);
+                const matchesSearch = buggyId.toLowerCase().includes(searchQuery);
+
+                if (currentFilter === 'unchecked') return !logMonth && matchesSearch;
+                if (currentFilter === 'daily_unchecked') return !logToday && matchesSearch;
+                return matchesSearch;
+            });
+
+            if (filtered.length === 0) {
+                container.innerHTML = `<p class="text-xs text-slate-400 text-center py-8">Kosong.</p>`;
+                return;
+            }
+
+            filtered.forEach(buggyId => {
+                const logToday = checkingLogs.find(l => l.buggyId === buggyId && l.date === todayStr);
+                const logMonth = checkingLogs.filter(l => l.buggyId === buggyId && l.period === selectedPeriod);
+                const isCheckedToday = !!logToday;
+
+                const card = document.createElement('div');
+                card.className = `p-3 rounded-xl border cursor-pointer flex justify-between items-center transition-all shadow-sm hover:scale-[1.01] ${isCheckedToday ? 'bg-emerald-50 border-emerald-200 hover:bg-emerald-100/70' : 'bg-white border-slate-200 hover:bg-slate-50'}`;
+                card.onclick = () => openFormCheck(buggyId);
+                card.innerHTML = `
+                    <div>
+                        <p class="font-bold text-sm text-slate-800">${buggyId}</p>
+                        <p class="text-[11px] ${isCheckedToday ? 'text-emerald-600 font-semibold' : 'text-slate-400'} mt-0.5">${isCheckedToday ? '✅ Selesai Hari Ini' : '⏳ Belum Cek Hari Ini'}</p>
+                    </div>
+                    <div class="text-right"><span class="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded-md">${logMonth.length}x Checked</span></div>`;
+                container.appendChild(card);
+            });
+        }
+
+        function openFormCheck(buggyId) {
+            document.getElementById('form-placeholder').classList.add('hidden');
+            const form = document.getElementById('maintenance-form');
+            form.classList.remove('hidden');
+            document.getElementById('selected-device-title').innerText = buggyId;
+            document.getElementById('form-device-id').value = buggyId;
+
+            const now = new Date();
+            const todayStr = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+            const existingLog = checkingLogs.find(l => l.buggyId === buggyId && l.date === todayStr);
+
+            criteriaList.forEach((_, index) => {
+                const selectElement = document.getElementById(`dynamic-input-${index}`);
+                if(selectElement) {
+                    if (existingLog && existingLog.results[index]) selectElement.value = existingLog.results[index];
+                    else selectElement.selectedIndex = 0;
+                }
+            });
+            document.getElementById('input-catatan').value = existingLog ? existingLog.catatan : '';
+        }
+
+        async function saveChecklist(e) {
+            e.preventDefault();
+            const buggyId = document.getElementById('form-device-id').value;
+            const now = new Date();
+            const formattedDate = `${now.getDate()}/${now.getMonth() + 1}/${now.getFullYear()}`;
+            const resultsData = {};
+
+            criteriaList.forEach((_, index) => { 
+                const el = document.getElementById(`dynamic-input-${index}`);
+                if(el) resultsData[index] = el.value;
+            });
+
+            const existingLog = checkingLogs.find(l => l.buggyId === buggyId && l.date === formattedDate);
+            const logPayload = {
+                id: existingLog ? existingLog.id : 'log_' + buggyId + '_' + formattedDate.replace(/\//g, '_'),
+                buggyId: buggyId,
+                period: selectedPeriod, 
+                date: formattedDate,
+                results: resultsData,
+                catatan: document.getElementById('input-catatan').value || '-'
+            };
+
+            if (existingLog) {
+                checkingLogs[checkingLogs.findIndex(l => l.id === existingLog.id)] = logPayload;
+            } else {
+                checkingLogs.push(logPayload);
+            }
+
+            try {
+                await fetch(`${API_BASE_URL}/logs`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(logPayload)
+                });
+            } catch(e) {}
+
+            renderDeviceList();
+            cancelForm();
+        }
+
+        function cancelForm() {
+            document.getElementById('maintenance-form').classList.add('hidden');
+            document.getElementById('form-placeholder').classList.remove('hidden');
+            document.getElementById('maintenance-form').reset();
+        }
+
+        async function changePeriod() {
+            selectedPeriod = document.getElementById('period-select').value;
+            cancelForm();
+            await fetchLogsFromServer();
+        }
+
+        // ================= ENGINE MASTER DATA BUGGY =================
+        function renderMasterBuggy() {
+            const container = document.getElementById('master-buggy-list');
+            container.innerHTML = '';
+            buggyList.forEach(buggy => {
+                const div = document.createElement('div');
+                div.className = "bg-slate-50 border border-slate-200 rounded-lg p-2 flex justify-between items-center text-xs font-semibold";
+                div.innerHTML = `<span>${buggy}</span><button onclick="deleteBuggyMaster('${buggy}')" class="text-rose-500 hover:text-rose-700 font-bold cursor-pointer">×</button>`;
+                container.appendChild(div);
+            });
+        }
+
+        function addBuggyMaster(e) {
+            e.preventDefault();
+            const input = document.getElementById('input-new-buggy');
+            const name = input.value.trim();
+            if(name && !buggyList.includes(name)) {
+                buggyList.push(name);
+                buggyList.sort();
+                localStorage.setItem('cfg_buggy_fleet', JSON.stringify(buggyList));
+                renderMasterBuggy();
+                renderDeviceList();
+                input.value = '';
+            }
+        }
+
+        function deleteBuggyMaster(name) {
+            if(confirm(`Hapus ${name} dari sistem master?`)) {
+                buggyList = buggyList.filter(b => b !== name);
+                localStorage.setItem('cfg_buggy_fleet', JSON.stringify(buggyList));
+                renderMasterBuggy();
+                renderDeviceList();
+            }
+        }
+
+        // ================= ENGINE MASTER DATA KRITERIA =================
+        function renderMasterKriteria() {
+            const container = document.getElementById('master-kriteria-list');
+            container.innerHTML = '';
+            criteriaList.forEach((crit, idx) => {
+                const div = document.createElement('div');
+                div.className = "p-3 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-start gap-2";
+                div.innerHTML = `
+                    <div>
+                        <h4 class="text-xs font-bold text-slate-800">${crit.name}</h4>
+                        <p class="text-[11px] text-slate-500 mt-0.5">Opsi: ${crit.options.join(' | ')}</p>
+                    </div>
+                    <button onclick="deleteKriteriaMaster(${idx})" class="text-xs font-bold text-rose-600 hover:underline cursor-pointer">Hapus</button>`;
+                container.appendChild(div);
+            });
+        }
+
+        function addKriteriaMaster(e) {
+            e.preventDefault();
+            const nameEl = document.getElementById('input-crit-name');
+            const optEl = document.getElementById('input-crit-options');
+            
+            const newCrit = {
+                name: nameEl.value.trim(),
+                options: optEl.value.split(',').map(o => o.trim()).filter(o => o.length > 0)
+            };
+
+            criteriaList.push(newCrit);
+            localStorage.setItem('cfg_criteria', JSON.stringify(criteriaList));
+            buildFormFields();
+            renderMasterKriteria();
+            
+            nameEl.value = '';
+            optEl.value = '';
+        }
+
+        function deleteKriteriaMaster(idx) {
+            if(confirm("Hapus kriteria penilaian ini?")) {
+                criteriaList.splice(idx, 1);
+                localStorage.setItem('cfg_criteria', JSON.stringify(criteriaList));
+                buildFormFields();
+                renderMasterKriteria();
+            }
+        }
+
+        function resetKriteriaToDefault() {
+            if(confirm("Kembalikan parameter penilaian ke default awal?")) {
+                criteriaList = [...defaultCriteria];
+                localStorage.setItem('cfg_criteria', JSON.stringify(defaultCriteria));
+                buildFormFields();
+                renderMasterKriteria();
+            }
+        }
+
+        // ================= ENGINE TAB SEMUA LOG & EXPORT =================
+        function renderLogsTable() {
+            const tbody = document.getElementById('table-logs-body');
+            tbody.innerHTML = '';
+            const periodLogs = checkingLogs.filter(l => l.period === selectedPeriod);
+
+            if(periodLogs.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="4" class="p-4 text-center text-xs text-slate-400">Tidak ada log data di periode bulan ini.</td></tr>`;
+                return;
+            }
+
+            periodLogs.forEach(log => {
+                let detailHtml = criteriaList.map((c, i) => `
+                    <span class="inline-block bg-slate-100 text-[10px] text-slate-600 px-2 py-0.5 rounded-md mr-1 mb-1">
+                        <b>${c.name}:</b> ${log.results[i] || '-'}
+                    </span>
+                `).join('');
+
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 border-b border-slate-100 text-xs";
+                tr.innerHTML = `
+                    <td class="p-3 font-semibold text-slate-700 whitespace-nowrap">${log.date}</td>
+                    <td class="p-3 font-bold text-blue-600">${log.buggyId}</td>
+                    <td class="p-3 max-w-md">${detailHtml}</td>
+                    <td class="p-3 text-slate-500 italic max-w-xs truncate">${log.catatan}</td>`;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function exportToCSV() {
+            const periodLogs = checkingLogs.filter(l => l.period === selectedPeriod);
+            if (periodLogs.length === 0) { alert("Tidak ada data untuk di-export."); return; }
+
+            let csvContent = "data:text/csv;charset=utf-8,Periode,ID Buggy,Tanggal Cek," + criteriaList.map(c => c.name).join(",") + ",Catatan\n";
+            periodLogs.forEach(log => {
+                const row = [log.period, log.buggyId, log.date];
+                criteriaList.forEach((_, critIdx) => { row.push(log.results[critIdx] || "-"); });
+                row.push(`"${log.catatan.replace(/"/g, '""')}"`);
+                csvContent += row.join(",") + "\n";
+            });
+            
+            const link = document.createElement("a");
+            link.setAttribute("href", encodeURI(csvContent));
+            link.setAttribute("download", `Laporan_Harian_Buggy_${selectedPeriod}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+    </script>
+</body>
+</html>
